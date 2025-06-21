@@ -47,7 +47,7 @@ class ChatList extends StatelessWidget {
                     const Spacer(),
                     IconButton(
                       icon: const Icon(Icons.add),
-                      onPressed: provider.createNewChat,
+                      onPressed: () => provider.showNewChatDialog(context),
                       tooltip: 'New Chat',
                     ),
                   ],

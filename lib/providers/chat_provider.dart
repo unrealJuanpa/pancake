@@ -96,13 +96,13 @@ class ChatProvider with ChangeNotifier {
     }
   }
   
-  Future<void> createNewChat() async {
+  Future<void> createNewChat({String? title}) async {
     try {
       _isLoading = true;
       notifyListeners();
       
       final chatId = await _db.createChat(
-        title: 'New Chat',
+        title: title ?? 'New Chat',
         modelName: _selectedModel,
         systemPrompt: _systemPromptController.text,
         maxHistoryLength: _maxHistoryLength,
@@ -114,9 +114,65 @@ class ChatProvider with ChangeNotifier {
       await loadChat(chatId);
     } catch (e) {
       _error = 'Failed to create chat: $e';
+      rethrow;
     } finally {
       _isLoading = false;
       notifyListeners();
+    }
+  }
+  
+  Future<void> showNewChatDialog(BuildContext context) async {
+    final TextEditingController nameController = TextEditingController();
+    
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('New Chat'),
+        content: TextField(
+          controller: nameController,
+          decoration: const InputDecoration(
+            labelText: 'Chat name',
+            hintText: 'Enter a name for this chat',
+            border: OutlineInputBorder(),
+          ),
+          autofocus: true,
+          onSubmitted: (value) {
+            if (value.trim().isNotEmpty) {
+              Navigator.of(context).pop(value.trim());
+            }
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          ValueListenableBuilder<TextEditingValue>(
+            valueListenable: nameController,
+            builder: (context, value, child) {
+              final isEnabled = value.text.trim().isNotEmpty;
+              return ElevatedButton(
+                onPressed: isEnabled 
+                    ? () => Navigator.of(context).pop(value.text.trim())
+                    : null,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: isEnabled 
+                      ? Theme.of(context).colorScheme.primary
+                      : Theme.of(context).disabledColor,
+                  foregroundColor: isEnabled 
+                      ? Theme.of(context).colorScheme.onPrimary
+                      : Theme.of(context).colorScheme.onSurface.withOpacity(0.38),
+                ),
+                child: const Text('Create'),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+    
+    if (result != null) {
+      await createNewChat(title: result);
     }
   }
   
