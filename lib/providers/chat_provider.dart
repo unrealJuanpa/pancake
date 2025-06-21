@@ -46,6 +46,7 @@ class ChatProvider with ChangeNotifier {
   List<String> get availableModels => _availableModels;
   
   ChatProvider() {
+    _systemPromptController.text = '';
     _init();
   }
   
@@ -63,6 +64,9 @@ class ChatProvider with ChangeNotifier {
       
       // Load available models
       await _loadAvailableModels();
+      
+      // Ensure system prompt is empty by default
+      _systemPromptController.clear();
     } catch (e) {
       _error = 'Error initializing: $e';
     } finally {
@@ -110,6 +114,7 @@ class ChatProvider with ChangeNotifier {
         useStreaming: _useStreaming,
       );
       
+
       await _loadChats();
       await loadChat(chatId);
     } catch (e) {
@@ -258,6 +263,7 @@ class ChatProvider with ChangeNotifier {
     
     try {
       _isGenerating = true;
+      notifyListeners();
       
       // Add user message to chat
       final userMessageId = await _db.addMessage(
@@ -266,19 +272,21 @@ class ChatProvider with ChangeNotifier {
         content: userMessage,
       );
       
-      // Add assistant's empty message (will be updated with streaming)
-      final assistantMessageId = await _db.addMessage(
+      // Add assistant's loading message
+      final loadingMessageId = await _db.addMessage(
         chatId: _currentChat!.id,
         role: 'assistant',
-        content: '',
+        content: 'Thinking...',
       );
       
       // Reload messages to get the latest
       _currentMessages = await _db.getMessagesForChat(_currentChat!.id);
+      notifyListeners();
+      _scrollToBottom();
       
-      // Get the assistant's message
+      // Get the assistant's message index
       final assistantMessageIndex = _currentMessages.indexWhere(
-        (m) => m.id == assistantMessageId,
+        (m) => m.id == loadingMessageId,
       );
       
       if (assistantMessageIndex == -1) {
@@ -292,12 +300,20 @@ class ChatProvider with ChangeNotifier {
       
       // Generate response
       String fullResponse = '';
+      bool isFirstChunk = true;
       
       await _ollamaService.generateResponse(
         chat: _currentChat!,
         messages: recentMessages,
         onChunk: (chunk) {
-          fullResponse += chunk;
+          if (isFirstChunk) {
+            // Replace the loading message with the first chunk
+            fullResponse = chunk;
+            isFirstChunk = false;
+          } else {
+            fullResponse += chunk;
+          }
+          
           _currentMessages[assistantMessageIndex] = _currentMessages[assistantMessageIndex].copyWith(
             content: fullResponse,
           );
@@ -309,7 +325,7 @@ class ChatProvider with ChangeNotifier {
           await _db.addMessage(
             chatId: _currentChat!.id,
             role: 'assistant',
-            content: fullResponse,
+            content: fullResponse.isEmpty ? 'No response generated' : fullResponse,
           );
           _isGenerating = false;
           notifyListeners();
@@ -321,6 +337,31 @@ class ChatProvider with ChangeNotifier {
       _error = 'Error sending message: $e';
       _isGenerating = false;
       notifyListeners();
+      
+      // Update the loading message with the error
+      if (_currentChat != null) {
+        final messages = await _db.getMessagesForChat(_currentChat!.id);
+        final lastMessage = messages.lastWhere(
+          (m) => m.role == 'assistant' && m.content == 'Thinking...',
+          orElse: () => Message(
+            id: '',
+            chatId: _currentChat!.id,
+            role: MessageRole.assistant,
+            content: 'Thinking...',
+            timestamp: DateTime.now(),
+          ),
+        );
+        
+        if (lastMessage.id.isNotEmpty) {
+          await _db.addMessage(
+            chatId: _currentChat!.id,
+            role: 'assistant',
+            content: 'Sorry, I encountered an error. Please try again.',
+          );
+          _currentMessages = await _db.getMessagesForChat(_currentChat!.id);
+          notifyListeners();
+        }
+      }
     }
   }
   
